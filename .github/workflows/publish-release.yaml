@@ -12,16 +12,22 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest # 所有平台的构建都可以在 Ubuntu 上完成，因为 .NET 支持跨平台发布
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
+          # Linux x64
           - runtime: 'linux-x64'
-            artifact_name: '$OpenClawWalletServer-linux-x64'
+            artifact_name: 'OpenClawWalletServer-linux-x64'
+            archive_ext: '.tar.gz'
+          # Windows x64
           - runtime: 'win-x64'
-            artifact_name: '$OpenClawWalletServer-win-x64'
+            artifact_name: 'OpenClawWalletServer-win-x64'
+            archive_ext: '.zip'
+          # macOS x64
           - runtime: 'osx-x64'
-            artifact_name: '$OpenClawWalletServer-osx-x64'
+            artifact_name: 'OpenClawWalletServer-osx-x64'
+            archive_ext: '.tar.gz'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,21 +37,23 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Restore dependencies
-        run: dotnet restore ${{ env.PROJECT_NAME }}
+      # 关键修改：在 restore 时也指定运行时
+      - name: Restore dependencies for ${{ matrix.runtime }}
+        run: dotnet restore ${{ env.PROJECT_NAME }} --runtime ${{ matrix.runtime }}
 
+      # publish 命令保持不变，但不再需要 --no-restore
       - name: Build and Publish (${{ matrix.runtime }})
-        run: dotnet publish ${{ env.PROJECT_NAME }} --runtime ${{ matrix.runtime }} --output ./publish-${{ matrix.runtime }} --configuration Release --self-contained true --no-restore
+        run: dotnet publish ${{ env.PROJECT_NAME }} --runtime ${{ matrix.runtime }} --output ./publish-${{ matrix.runtime }} --configuration Release --self-contained true
 
       - name: Create Archive for ${{ matrix.runtime }}
         run: |
           cd ./publish-${{ matrix.runtime }}
-          if [ "${{ matrix.runtime }}" = "win-x64" ]; then
-            # Windows 上通常使用 zip
-            zip -r ../${{ matrix.artifact_name }}.zip .
+          if [ "${{ matrix.archive_ext }}" = ".zip" ]; then
+            # Windows 平台使用 zip
+            zip -r ../${{ matrix.artifact_name }}${{ matrix.archive_ext }} .
           else
-            # Linux/macOS 上使用 tar.gz
-            tar czf ../${{ matrix.artifact_name }}.tar.gz .
+            # Linux/macOS 平台使用 tar.gz
+            tar czf ../${{ matrix.artifact_name }}${{ matrix.archive_ext }} .
           fi
 
       - name: Upload ${{ matrix.artifact_name }} Archive
@@ -55,24 +63,21 @@ jobs:
           path: ${{ matrix.artifact_name }}.*
 
   upload:
-    needs: build # 确保 upload job 在所有 build jobs 完成后才运行
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      # 下载所有由 build job 上传的构件
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      # 将所有压缩包移动到一个地方，方便上传
       - name: Move Archives to Upload Directory
         run: |
           mkdir upload_dir
           find artifacts -name "*.zip" -o -name "*.tar.gz" -exec mv {} upload_dir/ \;
 
-      # 创建 GitHub Release 并上传所有平台的压缩包
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
@@ -81,4 +86,4 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
-          files: upload_dir/* # 上传 upload_dir 目录下的所有文件
+          files: upload_dir/*
