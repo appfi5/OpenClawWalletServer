@@ -68,12 +68,18 @@ public class SignResp
     /// </summary>
     public required string Content { get; set; }
 
+    /// <summary>
+    /// 交易 Hash
+    /// </summary>
+    public required string TxHash { get; set; }
+
     public static SignResp From(SignCkbTransactionCommandResult result)
     {
         return new SignResp
         {
             Address = result.Address,
             Content = result.Content,
+            TxHash = result.TxHash,
         };
     }
 }

@@ -1,6 +1,8 @@
 using Ckb.Sdk.Ckb.Services;
 using Ckb.Sdk.Core.Signs;
 using Ckb.Sdk.Core.Types;
+using Ckb.Sdk.Utils.Utils;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Options;
 using NetCorePal.Extensions.Primitives;
 using Newtonsoft.Json;
@@ -42,6 +44,11 @@ public class SignCkbTransactionCommandResult
     /// 签名内容，交易
     /// </summary>
     public required string Content { get; set; }
+
+    /// <summary>
+    /// 交易 Hash
+    /// </summary>
+    public required string TxHash { get; set; }
 }
 
 /// <summary>
@@ -50,9 +57,15 @@ public class SignCkbTransactionCommandResult
 public class SignCkbTransactionCommandHandler(
     SignRecordRepository signRecordRepository,
     KeyConfigRepository keyConfigRepository,
-    IOptions<CkbOptions> ckbOptions
+    IOptions<CkbOptions> ckbOptions,
+    IDataProtectionProvider dataProtectionProvider
 ) : ICommandHandler<SignCkbTransactionCommand, SignCkbTransactionCommandResult>
 {
+    /// <summary>
+    /// DataProtectionProvider Key
+    /// </summary>
+    private const string ProviderKey = "PrivateKey";
+
     public async Task<SignCkbTransactionCommandResult> Handle(
         SignCkbTransactionCommand command,
         CancellationToken cancellationToken
@@ -77,10 +90,16 @@ public class SignCkbTransactionCommandHandler(
 
         var signer = TransactionSigner.GetInstance(ckbOptions.Value.Network);
 
+        // 解密私钥
+        var dataProtector = dataProtectionProvider.CreateProtector(ProviderKey);
+        var privateKey = dataProtector.Unprotect(keyConfig.PrivateKey);
+
         signer.SignTransaction(
             transaction: transactionWithScriptGroups2,
-            privateKeys: keyConfig.PrivateKey
+            privateKeys: privateKey
         );
+
+        var txHash = Numeric.ToHexString(transaction.ComputeHash());
 
         var signedContent = JsonConvert.SerializeObject(transactionWithScriptGroups2, GenerateJsonSetting());
         var signRecord = SignRecord.Create(
@@ -94,6 +113,7 @@ public class SignCkbTransactionCommandHandler(
         {
             Address = command.Address,
             Content = signedContent,
+            TxHash = txHash
         };
     }
 
@@ -127,9 +147,10 @@ public class SignCkbTransactionCommandHandler(
             var inputPreTx = await api.GetTransactionAsync(input.PreviousOutput.TxHash);
             if (inputPreTx is null)
             {
-                throw new KnownException($"Invalid transaction, invalid input: {JsonConvert.SerializeObject(input, GenerateJsonSetting())}");
+                throw new KnownException(
+                    $"Invalid transaction, invalid input: {JsonConvert.SerializeObject(input, GenerateJsonSetting())}");
             }
-            
+
             var key = inputPreTx.Transaction.Outputs[input.PreviousOutput.Index].Lock;
 
             if (!dictionary.TryGetValue(key, out var lockScriptGroup))

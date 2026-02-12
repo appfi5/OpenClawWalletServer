@@ -39,50 +39,17 @@ public class Program
         builder.Services.Configure<CurrentEnvironmentOptions>(builder.Configuration.GetSection("CurrentEnvironment"));
         builder.Configuration.GetSection("CurrentEnvironment").Bind(currentEnvironmentOptions);
 
-        // 配置密钥数据库
-        builder.Services.AddDbContext<KeyDbContext>(options =>
-            options.UseSqlite(
-                builder.Configuration.GetConnectionString("KeyDb"),
-                sqliteOptionsAction: optionsBuilder =>
-                    optionsBuilder.MigrationsAssembly(typeof(Program).Assembly.FullName)
-            )
-        );
-
-        // 配置 DataProtect
-        builder.Services.AddDataProtection().PersistKeysToDbContext<KeyDbContext>();
-
         // 配置应用数据库
         builder.Services.AddDbContext<ApplicationDbContext>(options =>
-        {
             options.UseSqlite(
                 builder.Configuration.GetConnectionString("AppDb"),
                 sqliteOptionsAction: optionBuilder =>
                     optionBuilder.MigrationsAssembly(typeof(Program).Assembly.FullName)
-            );
+            )
+        );
 
-            if (currentEnvironmentOptions.IsDebug)
-            {
-                options.UseAsyncSeeding(async (context, _, ct) =>
-                {
-                    var appContext = context as ApplicationDbContext;
-                    var keyConfig = await appContext!.KeyConfigs.FirstOrDefaultAsync(ct);
-                    if (keyConfig is null)
-                    {
-                        var addressInfo = GenAddressUtils.GenSingleAddress(Network.Testnet);
-                        await appContext.KeyConfigs.AddAsync(
-                            KeyConfig.Create(
-                                AddressType.Ckb,
-                                addressInfo.Address,
-                                addressInfo.PublicKey,
-                                addressInfo.PrivateKey
-                            ),
-                            ct
-                        );
-                        await appContext.SaveChangesAsync(ct);
-                    }
-                });
-            }
-        });
+        // 配置 DataProtect
+        builder.Services.AddDataProtection().PersistKeysToDbContext<ApplicationDbContext>();
 
 
         builder.Services.AddMediatR(configuration => configuration
@@ -153,10 +120,7 @@ public class Program
         }
 
         app.UseFastEndpoints().UseSwaggerGen(
-            config: c =>
-            {
-                c.Path = $"/openclaw-wallet-server/swagger/{{documentName}}/swagger.{{json|yaml}}";
-            },
+            config: c => { c.Path = $"/openclaw-wallet-server/swagger/{{documentName}}/swagger.{{json|yaml}}"; },
             uiConfig: u =>
             {
                 u.Path = $"/openclaw-wallet-server/swagger";
@@ -170,8 +134,29 @@ public class Program
         // 创建数据库文件
         var appDbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         await appDbContext.Database.MigrateAsync();
-        var keyDbContext = scope.ServiceProvider.GetRequiredService<KeyDbContext>();
-        await keyDbContext.Database.MigrateAsync();
+
+        // 初始化用户地址
+        if (currentEnvironmentOptions.IsDebug)
+        {
+            const string providerKey = "PrivateKey";
+            var provider = scope.ServiceProvider.GetRequiredService<IDataProtectionProvider>()
+                .CreateProtector(providerKey);
+            var keyConfig = await appDbContext.KeyConfigs.FirstOrDefaultAsync();
+            if (keyConfig is null)
+            {
+                var addressInfo = GenAddressUtils.GenSingleAddress(Network.Testnet);
+                await appDbContext.KeyConfigs.AddAsync(
+                    KeyConfig.Create(
+                        AddressType.Ckb,
+                        addressInfo.Address,
+                        addressInfo.PublicKey,
+                        provider.Protect(addressInfo.PrivateKey)
+                    )
+                );
+                await appDbContext.SaveChangesAsync();
+            }
+        }
+
 
         app.UseDefaultFiles();
         app.UseStaticFiles();

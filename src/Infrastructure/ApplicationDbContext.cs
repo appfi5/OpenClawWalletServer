@@ -1,4 +1,5 @@
 using MediatR;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using NetCorePal.Extensions.Repository.EntityFrameworkCore;
 using OpenClawWalletServer.Domain.AggregatesModel.AgentConfigAggregate;
@@ -13,7 +14,7 @@ namespace OpenClawWalletServer.Infrastructure;
 public partial class ApplicationDbContext(
     DbContextOptions<ApplicationDbContext> options,
     IMediator mediator
-) : AppDbContextBase(options, mediator)
+) : AppDbContextBase(options, mediator), IDataProtectionKeyContext
 {
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -61,4 +62,9 @@ public partial class ApplicationDbContext(
     /// 白名单项
     /// </summary>
     public DbSet<WhitelistItem> WhitelistItems => Set<WhitelistItem>();
+
+    /// <summary>
+    /// 密钥
+    /// </summary>
+    public DbSet<DataProtectionKey> DataProtectionKeys { get; set; } = default!;
 }
