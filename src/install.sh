@@ -4,13 +4,10 @@
 set -e
 
 APP_NAME="OpenClawWalletServer"
-REPO="appfi5/OpenClawWalletServer"  # 👈 替换为你的 GitHub 用户名/组织
-INSTALL_DIR="$HOME/.openclaw"
+REPO="appfi5/OpenClawWalletServer"
+INSTALL_DIR="$HOME/openClawWalletServer"
 LOG_FILE="$INSTALL_DIR/openclaw.log"
-
-# Create install dir
-mkdir -p "$INSTALL_DIR"
-cd "$INSTALL_DIR"
+DOWNLOAD=false
 
 # Detect OS and architecture
 UNAME_S=$(uname -s)
@@ -40,9 +37,7 @@ case "$UNAME_M" in
         if [ "$OS" = "osx" ]; then
             ARCH="arm64"
         else
-            ARCH="x64"  # .NET on Linux ARM64 uses linux-arm64, but many still use x64 emulation
-            # Optional: support linux-arm64 if you build it
-            # ARCH="arm64"
+            ARCH="x64"
         fi
         ;;
     *)
@@ -51,12 +46,10 @@ case "$UNAME_M" in
         ;;
 esac
 
-# Special case: macOS ARM64
 if [ "$OS" = "osx" ] && [ "$UNAME_M" = "arm64" ]; then
     ARCH="arm64"
 fi
 
-# Map to .NET RID
 if [ "$OS" = "osx" ]; then
     if [ "$ARCH" = "arm64" ]; then
         RID="osx-arm64"
@@ -64,7 +57,6 @@ if [ "$OS" = "osx" ]; then
         RID="osx-x64"
     fi
 else
-    # Assume Linux
     if [ "$ARCH" = "arm64" ]; then
         RID="linux-arm64"
     else
@@ -76,13 +68,115 @@ FILE="${APP_NAME}-${RID}.tar.gz"
 URL="https://github.com/${REPO}/releases/latest/download/${FILE}"
 
 echo "🔍 Detected OS: $OS, Arch: $UNAME_M → Using ${RID}"
-echo "⬇️ Downloading $FILE..."
+echo "📁 Install directory: $INSTALL_DIR"
 
-# Download and extract
-curl -L --progress-bar "$URL" | tar -xz
-chmod +x "$APP_NAME"
+# Create install dir if not exists
+if [ ! -d "$INSTALL_DIR" ]; then
+  mkdir -p "$INSTALL_DIR"
+fi
 
-# 如果日志文件不存在，则创建一个
+cd "$INSTALL_DIR"
+
+# Check if files exist
+EXECUTABLE_EXISTS=false
+CONFIG_EXISTS=false
+
+if [ -f "$APP_NAME" ]; then
+    EXECUTABLE_EXISTS=true
+fi
+
+if [ -f "appsettings.json" ] || [ -f "appsettings.Production.json" ]; then
+    CONFIG_EXISTS=true
+fi
+
+# Ask user if files exist
+if [ "$EXECUTABLE_EXISTS" = true ] && [ "$CONFIG_EXISTS" = true ]; then
+    echo ""
+    echo "📦 Found existing installation in $INSTALL_DIR"
+    printf "Do you want to download the latest version? [y/N]: "
+    read -r response
+    if [ "$response" != "y" ] && [ "$response" != "Y" ]; then
+        echo "🚀 Starting existing version..."
+    else
+        DOWNLOAD=true
+        echo "⬇️ Downloading latest version..."
+    fi
+else
+    DOWNLOAD=true
+    echo "📦 Installation not found, downloading latest version..."
+fi
+
+# Download and extract if needed
+if [ "$DOWNLOAD" = true ]; then
+    BACKUP_DIR="$INSTALL_DIR/.backup"
+    BACKUP_CREATED=false
+    
+    if [ "$EXECUTABLE_EXISTS" = true ] || [ "$CONFIG_EXISTS" = true ]; then
+        echo "📦 Backing up existing files..."
+        mkdir -p "$BACKUP_DIR"
+        if [ -f "$APP_NAME" ]; then
+            mv "$APP_NAME" "$BACKUP_DIR/"
+            BACKUP_CREATED=true
+        fi
+        if [ -f "appsettings.json" ]; then
+            mv "appsettings.json" "$BACKUP_DIR/"
+            BACKUP_CREATED=true
+        fi
+        if [ -f "appsettings.Production.json" ]; then
+            mv "appsettings.Production.json" "$BACKUP_DIR/"
+            BACKUP_CREATED=true
+        fi
+    fi
+    
+    echo "⬇️ Downloading $FILE..."
+    if ! curl -L --progress-bar "$URL" | tar -xz; then
+        echo "❌ Download or extraction failed!"
+        
+        if [ "$BACKUP_CREATED" = true ]; then
+            echo "🔄 Restoring backup..."
+            mv "$BACKUP_DIR"/* .
+            rm -rf "$BACKUP_DIR"
+        fi
+        
+        echo "Please check your network connection and try again."
+        exit 1
+    fi
+    
+    if [ ! -f "$APP_NAME" ]; then
+        echo "❌ Executable file not found after extraction!"
+        
+        if [ "$BACKUP_CREATED" = true ]; then
+            echo "🔄 Restoring backup..."
+            mv "$BACKUP_DIR"/* .
+            rm -rf "$BACKUP_DIR"
+        fi
+        
+        exit 1
+    fi
+    
+    if [ ! -f "appsettings.json" ] && [ ! -f "appsettings.Production.json" ]; then
+        echo "❌ Configuration file not found after extraction!"
+        
+        if [ "$BACKUP_CREATED" = true ]; then
+            echo "🔄 Restoring backup..."
+            mv "$BACKUP_DIR"/* .
+            rm -rf "$BACKUP_DIR"
+        fi
+        
+        exit 1
+    fi
+    
+    chmod +x "$APP_NAME"
+    
+    if [ "$BACKUP_CREATED" = true ]; then
+        rm -rf "$BACKUP_DIR"
+        echo "🗑️ Backup removed"
+    fi
+    
+    echo "✅ Download and extraction completed"
+fi
+
+# Create log file if not exists
 if [ ! -f "$LOG_FILE" ]; then
     touch "$LOG_FILE"
 fi
@@ -101,6 +195,8 @@ else
     IP="localhost"
 fi
 
+echo ""
 echo "✅ OpenClaw Wallet Server started!"
 echo "🌐 Access at: http://$IP:8080/openclaw-wallet-server/swagger/index.html"
 echo "📄 Log file: $LOG_FILE"
+echo "📁 Data directory: $INSTALL_DIR/data"
