@@ -193,7 +193,7 @@ fi
 pkill -f "$APP_NAME" 2>/dev/null || true
 
 # Start in background
-nohup "./$APP_NAME" --urls "http://*:8080" > "$LOG_FILE" 2>&1 &
+nohup "./$APP_NAME" --urls "http://*:18799" > "$LOG_FILE" 2>&1 &
 sleep 2
 
 # Get IP for Linux
@@ -205,6 +205,6 @@ fi
 
 echo ""
 echo "✅ OpenClaw Wallet Server started!"
-echo "🌐 Access at: http://$IP:8080/openclaw-wallet-server/swagger/index.html"
+echo "🌐 Access at: http://$IP:18799/openclaw-wallet-server/swagger/index.html"
 echo "📄 Log file: $LOG_FILE"
 echo "📁 Data directory: $INSTALL_DIR/data"
